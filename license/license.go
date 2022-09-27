@@ -11,6 +11,7 @@ func GenerateKey() License {
 
 type License struct {
 	Key          string    `json:"id" bson:"_id"`
+	Owner        string    `json:"owner" bson:"owner"`
 	CreationDate time.Time `json:"creation_date" bson:"creation_date"`
 	Disabled     bool      `json:"disabled" bson:"disabled"`
 }

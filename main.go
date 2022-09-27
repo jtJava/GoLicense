@@ -1,20 +1,21 @@
 package main
 
 import (
-	"Learning/license"
 	"context"
-	"encoding/json"
-	"fmt"
 	"github.com/go-chi/chi/v5"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"log"
 	"net/http"
+	"os"
 )
 
 func main() {
+	if len(os.Args) < 2 {
+		log.Fatal("You didn't set an api key.")
+	}
+
 	client, err := mongo.Connect(context.TODO(), options.Client().ApplyURI("mongodb://localhost:27017"))
 	if err != nil {
 		panic(err)
@@ -24,41 +25,23 @@ func main() {
 		panic(err)
 	}
 
-	collection = client.Database("default").Collection("licenses")
+	defer client.Disconnect(context.TODO())
+
+	collection := client.Database("default").Collection("licenses")
+
+	handlerContext := HandlerContext{apiKey: os.Args[1], collection: collection}
 
 	router := chi.NewRouter()
-	router.Get("/create/{key}", registerKey)
-	router.Get("/validate/{key}", validateKey)
+
+	router.Get("/validate/{key}", handlerContext.validateKey)
+
+	// Requires API key
+	router.Post("/create", handlerContext.registerKey)
+	router.Post("/all", handlerContext.allKeys)
+	router.Post("/unused", handlerContext.allUnusedKeys)
 
 	err = http.ListenAndServe(":3000", router)
 	if err != nil {
 		return
 	}
-}
-
-var collection *mongo.Collection
-
-var licenses = make(map[string]license.License)
-
-func registerKey(writer http.ResponseWriter, request *http.Request) {
-	licenseKey := license.GenerateKey()
-	_, err := collection.InsertOne(context.TODO(), licenseKey)
-	if err != nil {
-		return
-	}
-
-	licenses[licenseKey.Key] = licenseKey
-	err = json.NewEncoder(writer).Encode(licenseKey)
-	if err != nil {
-		return
-	}
-}
-
-func validateKey(writer http.ResponseWriter, request *http.Request) {
-	key := chi.URLParam(request, "key")
-	var licenseKey bson.D
-	if err := collection.FindOne(context.TODO(), bson.M{"_id": key}).Decode(&licenseKey); err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(licenseKey)
 }
