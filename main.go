@@ -56,31 +56,9 @@ func registerKey(writer http.ResponseWriter, request *http.Request) {
 
 func validateKey(writer http.ResponseWriter, request *http.Request) {
 	key := chi.URLParam(request, "key")
-	var result bson.D
-	err := collection.FindOne(context.TODO(), bson.M{"_id": key}).Decode(&result)
-	var podcast bson.D
-	if err = collection.FindOne(context.TODO(), bson.M{"_id": key}).Decode(&podcast); err != nil {
+	var licenseKey bson.D
+	if err := collection.FindOne(context.TODO(), bson.M{"_id": key}).Decode(&licenseKey); err != nil {
 		log.Fatal(err)
 	}
-	doc, err := bson.Marshal(bson.M{"_id": key})
-	fmt.Println(podcast)
-	var licensekey license.License
-	err = bson.Unmarshal(doc, &licensekey)
-	if err != nil {
-		println(licensekey.Disabled)
-		return
-	}
-
-	println(&result)
-	//for _, licens := range licenses {
-	//	if licens.Key.String() != key {
-	//		continue
-	//	}
-	//
-	//	err := json.NewEncoder(writer).Encode(licens)
-	//	if err != nil {
-	//		println("Match found for " + key)
-	//		return
-	//	}
-	//}
+	fmt.Println(licenseKey)
 }
