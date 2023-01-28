@@ -4,6 +4,8 @@ import (
 	"Learning/license"
 	"context"
 	"encoding/json"
+	"fmt"
+	"github.com/disgoorg/disgo/discord"
 	"github.com/go-chi/chi/v5"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -56,7 +58,16 @@ func (ctx *HandlerContext) registerKey(writer http.ResponseWriter, request *http
 		return
 	}
 
-	licenseKey := license.GenerateKey()
+	var licenseKey license.License
+	owner := request.Header.Get("owner")
+	project := request.Header.Get("project")
+	hwid := request.Header.Get("hwid")
+	if hwid != "" {
+		licenseKey = license.GenerateKeyWithHWID(owner, project, request.Header.Get("hwid"))
+	} else {
+		licenseKey = license.GenerateKey(owner, project)
+	}
+
 	_, err := ctx.collection.InsertOne(context.TODO(), licenseKey)
 	if err != nil {
 		return
@@ -70,12 +81,74 @@ func (ctx *HandlerContext) registerKey(writer http.ResponseWriter, request *http
 
 func (ctx *HandlerContext) validateKey(writer http.ResponseWriter, request *http.Request) {
 	key := chi.URLParam(request, "key")
+	hwid := chi.URLParam(request, "hwid")
 	var licenseKey bson.D
 	if err := ctx.collection.FindOne(context.TODO(), bson.M{"_id": key}).Decode(&licenseKey); err != nil {
 		_, _ = writer.Write([]byte("false"))
+		embed := []discord.Embed{discord.NewEmbedBuilder().
+			SetColor(16711680).
+			SetTitle("Suspicious License Request").
+			AddField("License Key", key, true).
+			AddField("IP Address", request.RemoteAddr, false).
+			Build()}
+		_, _ = GlobalWebhookClient.CreateEmbeds(embed)
 		return
 	}
+
+	var retrievedLicense license.License
+	bsonData, err := bson.Marshal(licenseKey)
+
+	if err != nil {
+		fmt.Println("There was an issue marshalling license key: ", key)
+		_, _ = writer.Write([]byte("error 1"))
+		return
+	}
+
+	if err = bson.Unmarshal(bsonData, &retrievedLicense); err != nil {
+		fmt.Println("There was an issue unmarshalling license key: ", key)
+		_, _ = writer.Write([]byte("error 2"))
+		return
+	}
+
 	_, _ = writer.Write([]byte("true"))
+
+	if retrievedLicense.HWIDRequired {
+		if retrievedLicense.HWID != hwid {
+			_, _ = writer.Write([]byte("false"))
+			embed := []discord.Embed{discord.NewEmbedBuilder().
+				SetColor(16711680).
+				SetTitle("Suspicious HWID License Request").
+				AddField("License Key", key, true).
+				AddField("Owner", retrievedLicense.Owner, true).
+				AddField("IP Address", request.RemoteAddr, false).
+				SetFooterText("Required HWID: " + retrievedLicense.HWID + " Received HWID: " + hwid).
+				Build()}
+			_, _ = GlobalWebhookClient.CreateEmbeds(embed)
+			return
+		}
+	}
+
+	if retrievedLicense.Disabled {
+		embed := []discord.Embed{discord.NewEmbedBuilder().
+			SetColor(16711680).
+			SetTitle("Disabled License Request").
+			AddField("License Key", key, true).
+			AddField("Owner", retrievedLicense.Owner, true).
+			AddField("IP Address", request.RemoteAddr, false).
+			SetFooterText("Required HWID: " + retrievedLicense.HWID + " Received HWID: " + hwid).
+			Build()}
+		_, _ = GlobalWebhookClient.CreateEmbeds(embed)
+	}
+
+	embed := []discord.Embed{discord.NewEmbedBuilder().
+		SetColor(65280).
+		SetTitle("License Verified Successfully").
+		AddField("License Key", key, false).
+		AddField("Owner", retrievedLicense.Owner, true).
+		AddField("IP Address", request.RemoteAddr, true).
+		AddField("Creation Date", retrievedLicense.CreationDate.String(), false).
+		Build()}
+	_, _ = GlobalWebhookClient.CreateEmbeds(embed)
 }
 
 func (ctx *HandlerContext) checkApiKey(apiKey string) (valid bool) {
